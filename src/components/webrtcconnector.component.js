@@ -10,11 +10,16 @@ const WebRTCConnector = ({ socket, role }) => {
   //const [remoteIceCandidates, setRemoteIceCandidates] = useState([]);
   //const [localDescription, setLocalDescription] = useState(null);
   //  const [remoteDescription, setRemoteDescription] = useState(null);
-  const [peerConnection, setPeerConnection] = useState(null);
+  // const [peerConnection, setPeerConnection] = useState(null);
+  const peerConnection = useRef(null);
 
-  const npConnection = useRef(null);
+  const dataChannel = useRef(null);
+  const channelName = "sldhfkshf";
+  // const npConnection = useRef(null);
   useEffect(() => {
-    console.log(npConnection.current);
+    console.log("logging peer connection ");
+    // console.log(peerConnection);
+    console.log(peerConnection.current);
   });
   const [chatList, setChatList] = useState([]);
   const peerConfiguration = {
@@ -25,30 +30,112 @@ const WebRTCConnector = ({ socket, role }) => {
     ],
   };
 
-  function createWebRTC() {
+  async function createWebRTC() {
+    console.log("creating web rtc connection");
     var lp = new RTCPeerConnection();
-    lp.onicecandidate = (e) => console.log("got myself an ice candidate ! ");
-    const dc = lp.createDataChannel("test124");
+
+    lp.onicecandidate = (e) => {
+      console.log(e);
+      socket.emit("peer-ice-candidate", { candidate: e.candidate });
+    };
+    //  const dc = lp.createDataChannel(channelName);
+
+    if (role === "caller") {
+      console.log("creating offer");
+      dataChannel.current = lp.createDataChannel(channelName);
+      dataChannel.current.onopen = (e) => console.log("data channel opened");
+      var offer = await lp.createOffer();
+      await lp.setLocalDescription(offer);
+      socket.emit("peer-offer", {
+        offer: lp.localDescription,
+        channelName: channelName,
+      });
+    }
+
+    // setPeerConnection(lp);
+    peerConnection.current = lp;
+
+    //   dc.onopen = (e) => {
+    //      console.log("Data channel opened");
+    //   };
     //var offer = await lp.createOffer();
     //await lp.setLocalDescription(offer);
 
-    lp.createOffer()
-      .then((offer) => lp.setLocalDescription(offer))
-      .then(() => {
-        socket.emit("peer-offer", lp.localDescription);
-        // setPeerConnection(lp);
-        npConnection.current = lp;
-      });
+    // lp.createOffer()
+    //   .then((offer) => lp.setLocalDescription(offer))
+    //   .then(() => {
+    //     socket.emit("peer-offer", {
+    //       offer: lp.localDescription,
+    //       channelName: channelName,
+    //     });
+    //     // setPeerConnection(lp);
+    //     npConnection.current = lp;
+    //   });
   }
+
+  function initSocketEvents() {
+    socket.on("remote-peer-offer", async (data) => {
+      console.log(peerConnection.current);
+      console.log("recevied remote offer");
+      console.log(data.offer);
+      // const rp = new RTCPeerConnection();
+
+      peerConnection.current.ondatachannel = (e) => {
+        console.log("found a data channel in the offer!");
+        dataChannel.current = e.channel;
+        dataChannel.current.onmessage = (e) =>
+          console.log("new message : " + e.data);
+        dataChannel.current.onopen = (e) => console.log("connection opened");
+      };
+      await peerConnection.current.setRemoteDescription(
+        new RTCSessionDescription(data.offer)
+      );
+      const answer = await peerConnection.current.createAnswer();
+      await peerConnection.current.setLocalDescription(answer);
+      socket.emit("peer-answer", { answer: answer });
+      //setPeerConnection(rp);
+    });
+
+    socket.on("lobby-member-count", (data) => {
+      if (data.memCount === 2) {
+        createWebRTC();
+      }
+    });
+
+    socket.on("remote-peer-ice-candidate", async (data) => {
+      console.log("got a remote ice candidate : " + data.candidate);
+      await peerConnection.current.addIceCandidate(data.candidate);
+    });
+
+    socket.on("remote-peer-answer", async (data) => {
+      console.log("received remote answer");
+      await peerConnection.current.setRemoteDescription(
+        new RTCSessionDescription(data.answer)
+      );
+      // peerConnection.current.dc =
+      //   peerConnection.current.createDataChannel(channelName);
+      // peerConnection.current.dc.onopen = (e) =>
+      //   console.log("data channel opened");
+    });
+  }
+
   useEffect(() => {
     // initSocketEvents();
-    createWebRTC();
+    //createWebRTC();
   }, [socket]);
+
+  useEffect(() => {
+    initSocketEvents();
+  }, [socket]);
+
   return (
     <div>
       this is a webRTCConnector!!
       <input type="text"></input>
-      <button> send chat</button>
+      <button onClick={() => dataChannel.current.send("yolo")}>
+        {" "}
+        send chat
+      </button>
       {chatList.map((chat) => {
         <p>{chat}</p>;
       })}
@@ -57,81 +144,3 @@ const WebRTCConnector = ({ socket, role }) => {
 };
 
 export default WebRTCConnector;
-
-// async function createPeerConnection() {
-//   console.log("creating peer connection");
-//   const pConnection = await new RTCPeerConnection(peerConfiguration);
-//   pConnection.addEventListener("icecandidate", (event) => {
-//     console.log("adding local ice candidate : " + event.candidate);
-//     if (event.candidate) {
-//       socket.emit("peer-ice-candidate", { iceCandidate: event.candidate });
-//     }
-//   });
-
-//   pConnection.addEventListener("connectionstatechange", (event) => {
-//     if (pConnection.connectionState === "connected") {
-//       console.log("peers are connected");
-//     }
-//   });
-
-//   console.log("local peer connection created ");
-//   console.log(pConnection);
-//   setPeerConnection(pConnection, () => {
-//     console.log("state is initialized");
-//   });
-//   // initSocketEvents();
-// }
-// async function initSocketEvents() {
-//   socket.on("remote-peer-answer", async (data) => {
-//     console.log("remote peer answer received");
-//     if (data.answer) {
-//       const remoteDescription = RTCSessionDescription(data.answer);
-//       await peerConnection.setRemoteDescription(remoteDescription);
-//     }
-//   });
-//   socket.on("remote-peer-offer", async (data) => {
-//     console.log("remote peer offer received");
-//     if (data.offer) {
-//       await peerConnection.setRemoteDescription(
-//         new RTCSessionDescription(data.offer)
-//       );
-//       const answer = await peerConnection.createAnswer();
-//       await peerConnection.setLocalDescription(answer);
-//       socket.emit("peer-answer", { answer: answer });
-//     }
-//   });
-
-//   socket.on("remote-peer-ice-candidate", async (data) => {
-//     console.log("adding remote ice candidate : " + data.iceCandidate);
-//     if (data.iceCandidate) {
-//       await peerConnection.addIceCandidate(data.iceCandidate);
-//     }
-//   });
-
-//   socket.on("lobby-member-count", async (data) => {
-//     if (data.memCount === 2) {
-//       await createPeerConnection();
-//       socket.emit("peer-connection-created", {
-//         peerConnection: peerConnection,
-//       });
-//     }
-//   });
-
-//   socket.on("initiate-offer", () => {
-//     console.log("printign peer connection");
-//     console.log(peerConnection);
-//     //sendOffer();
-//   });
-// }
-
-// async function sendOffer() {
-//   if (!peerConnection) {
-//     console.log("peer connection is null ! aborting");
-//     return;
-//   }
-//   if (role === "caller") {
-//     const offer = await peerConnection.createOffer();
-//     await peerConnection.setLocalDescription(offer);
-//     socket.emit("peer-offer", { offer: offer });
-//   }
-// }
